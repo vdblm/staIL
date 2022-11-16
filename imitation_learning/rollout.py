@@ -1,5 +1,3 @@
-# Code Adapted from https://github.dev/unstable-zeros/TaSIL
-
 import jax.random
 import jax.tree_util as tree_util
 import jax.numpy as jnp

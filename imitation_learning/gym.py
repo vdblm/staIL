@@ -1,6 +1,3 @@
-# Code Adapted from https://github.dev/unstable-zeros/TaSIL
-
-import gym
 import pickle
 import flax
 import jax
@@ -15,7 +12,7 @@ from util.dataset import INFINITE, Dataset, DatasetIterator
 from util.models import MLP
 
 class GymGenerator(Dataset):
-    def __init__(self, rng_key, traj_length, env, policy,
+    def __init__(self, rng_key, traj_length, env, policy, 
                     scale_dynamics, vis):
         self._rng_key = rng_key
         self._traj_length = traj_length
@@ -29,11 +26,11 @@ class GymGenerator(Dataset):
         return INFINITE
 
     def with_key(self, rng_key):
-        return GymGenerator(rng_key, self._traj_length,
+        return GymGenerator(rng_key, self._traj_length, 
                 self._env, self._policy, self._scale_dynamics, self._vis)
 
     def with_length(self, length):
-        return GymGenerator(self._rng_key, length, self._env, self._policy,
+        return GymGenerator(self._rng_key, length, self._env, self._policy, 
                             self._scale_dynamics, self._vis)
 
     def with_policy(self, policy):
@@ -41,7 +38,7 @@ class GymGenerator(Dataset):
                             self._scale_dynamics, self._vis)
 
     def with_visualize(self, vis):
-        return GymGenerator(self._rng_key, self._traj_length, self._env, self._policy,
+        return GymGenerator(self._rng_key, self._traj_length, self._env, self._policy, 
                             self._scale_dynamics, vis)
 
     def iter(self):
@@ -92,7 +89,7 @@ def load_gym_expert_from_path(path, env, scale_output):
 
     expert_params = jax.device_put(expert_data['params'])
 
-    model = MLP((expert_params['layer_0']['bias'].shape[0],
+    model = MLP((expert_params['layer_0']['bias'].shape[0], 
         expert_params['layer_1']['bias'].shape[0],
         expert_params['layer_2']['bias'].shape[0]), expert_data['activation'])
     expert_params = flax.core.frozen_dict.freeze({

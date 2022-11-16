@@ -1,10 +1,9 @@
-# Code Adapted from https://github.dev/unstable-zeros/TaSIL
-
 import jax
 import jax.numpy as jnp
 from util.models import MLP
-from rollout import TrajectoryGenerator, ArtificialSystem, ExponentialSystem, ModelPolicy, NormalGenerator, flatten_trajectory
-from gym import GymGenerator, make_gym_expert, make_gym_policy
+from imitation_learning.rollout import TrajectoryGenerator, \
+    ArtificialSystem, ExponentialSystem, ModelPolicy, NormalGenerator, flatten_trajectory
+from imitation_learning.gym import GymGenerator, make_gym_expert, make_gym_policy
 import gym
 
 
@@ -25,8 +24,7 @@ def make_system(config, rng_key):
         generator = TrajectoryGenerator(
             traj_length=config.traj_length,
             init_gen=NormalGenerator(config.state_dim),
-            dynamics=ArtificialSystem(5, 0.3, config.gamma, expert) if config.environment == 'dummy' else \
-                ExponentialSystem(0.95, 5, config.gamma, expert),
+            dynamics=ArtificialSystem(5, 0.3, config.gamma, expert) if config.environment == 'dummy' else ExponentialSystem(0.95, 5, config.gamma, expert),
             policy=expert,
             rng_key=gen_rng
         )
