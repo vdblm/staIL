@@ -13,7 +13,7 @@ def make_system(config, rng_key):
         expert_rng, policy_rng, gen_rng = jax.random.split(rng_key, 3)
         expert_model = MLP((32, 32, config.state_dim), config.activation,
                            kernel_init=jax.nn.initializers.variance_scaling(1.0, "fan_in", "truncated_normal"),
-                           bias_init=jax.nn.initializers.normal(0.1))
+                           bias_init=jax.nn.initializers.normal(0.1), lipschitz=True)
         expert_params = expert_model.init(expert_rng, jnp.zeros(config.state_dim))
 
         def expert(x, rng=None):

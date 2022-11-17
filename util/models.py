@@ -1,10 +1,10 @@
 import flax.linen as nn
-import flax.linen.linear
 import flax.linen.initializers
+from lipschitz.layers import BjorckLinear
 from typing import Sequence, Callable, Optional, Any, Tuple
-import numpy as np
 import jax
 import jax.numpy as jnp
+from jax import custom_vjp
 
 PRNGKey = Any
 Shape = Tuple[int, ...]
@@ -19,12 +19,13 @@ class MLP(nn.Module):
     bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = flax.linen.initializers.zeros
     batch_norm: bool = False
     use_running_average: Optional[bool] = None
+    lipschitz: bool = False
 
     @nn.compact
     def __call__(self, x, use_running_average=None):
         if not self.batch_norm:
             use_running_average = False
-        use_runnning_average = nn.merge_param('use_running_average', self.use_running_average, use_running_average)
+        use_running_average = nn.merge_param('use_running_average', self.use_running_average, use_running_average)
         if self.activation == 'relu':
             activation_fn = jax.nn.relu
         elif self.activation == 'gelu':
@@ -34,8 +35,11 @@ class MLP(nn.Module):
         else:
             raise ValueError(f"Expected relu, tanh, or gelu, got {self.activation}")
         for (i, feat) in enumerate(self.features):
-            x = nn.Dense(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
-            if i != len(self.features) - 1:
+            if self.lipschitz:
+                x = BjorckLinear(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
+            else:
+                x = nn.Dense(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
+            if i != len(self.features) - 1 and not self.lipschitz:
                 if self.batch_norm:
                     x = nn.BatchNorm(use_running_average=use_running_average,
                                      momentum=0.9,
@@ -60,9 +64,6 @@ def safe_norm(x, min_norm, *args, **kwargs):
                      jnp.linalg.norm(x, *args, **kwargs))
 
 
-from jax import custom_vjp
-
-
 @custom_vjp
 def clip_gradient(x, lo, hi):
     return x  # identity function
@@ -74,12 +75,10 @@ def clip_gradient_fwd(x, lo, hi):
 
 def clip_gradient_bwd(res, g):
     lo, hi = res
-    return (jnp.clip(g, lo, hi), None, None)  # use None to indicate zero cotangents for lo and hi
+    return jnp.clip(g, lo, hi), None, None  # use None to indicate zero cotangents for lo and hi
 
 
 clip_gradient.defvjp(clip_gradient_fwd, clip_gradient_bwd)
-
-from jax.example_libraries.optimizers import l2_norm
 
 
 def scale_clip_grads(g, max_norm):
@@ -98,7 +97,7 @@ def scale_clip_bp_fwd(x, max_norm):
 
 
 def scale_clip_bp_bwd(max_norm, g):
-    return (scale_clip_grads(g, max_norm), None)  # use None to indicate zero cotangents for lo and hi
+    return scale_clip_grads(g, max_norm), None  # use None to indicate zero cotangents for lo and hi
 
 
 scale_clip_bp.defvjp(scale_clip_bp_fwd, scale_clip_bp_bwd)
