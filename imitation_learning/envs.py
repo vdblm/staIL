@@ -28,7 +28,7 @@ def make_system(config, rng_key):
             policy=expert,
             rng_key=gen_rng
         )
-        model = MLP((64, 64, 64, config.state_dim), config.activation)
+        model = MLP((64, 64, 64, config.state_dim), config.activation, lipschitz=True)
         init_params = model.init(policy_rng, jnp.zeros(config.state_dim), use_running_average=False)
 
         def policy(vars, x, rng=None, update_batch_stats=False):

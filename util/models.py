@@ -1,6 +1,7 @@
 import flax.linen as nn
 import flax.linen.initializers
 from lipschitz.layers import BjorckLinear
+from lipschitz.activations import max_min
 from typing import Sequence, Callable, Optional, Any, Tuple
 import jax
 import jax.numpy as jnp
@@ -37,14 +38,17 @@ class MLP(nn.Module):
         for (i, feat) in enumerate(self.features):
             if self.lipschitz:
                 x = BjorckLinear(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
+                if x.shape[-1] % 2:
+                    raise ValueError(f"Number of features ({x.shape[-1]}) is not a multiple of 2")
+                x = max_min(x, x.shape[-1] // 2)
             else:
                 x = nn.Dense(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
-            if i != len(self.features) - 1 and not self.lipschitz:
-                if self.batch_norm:
-                    x = nn.BatchNorm(use_running_average=use_running_average,
-                                     momentum=0.9,
-                                     epsilon=1e-5, axis_name='batch')(x)
-                x = activation_fn(x)
+                if i != len(self.features) - 1:
+                    if self.batch_norm:
+                        x = nn.BatchNorm(use_running_average=use_running_average,
+                                         momentum=0.9,
+                                         epsilon=1e-5, axis_name='batch')(x)
+                    x = activation_fn(x)
         return x
 
 
