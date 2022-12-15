@@ -13,11 +13,20 @@ DEFAULT_CONFIG = {
     'train_trajs': 50,
     'test_trajs': 50,
 
+    'noisy_demo': False,
+    'noisy_demo_std': 0.5,
+    'lip_const': 5.0,
+    'lip_policy': False,
+    'noisy_input': False,
+    'noisy_input_std': 2,
+    'jacob_reg': False,
+    'jacob_lambda': 0.1,
+
     'environment': 'dummy2',
     'p': 5,
-    'eta': 0.3,
-    'state_dim': 10,
-    'activation': 'gelu',
+    'eta': 0.95,
+    'state_dim': 2,
+    'activation': 'relu',
 
     'gym_alternate_expert': '',
     # Tanh scaling of expert is opposite of scaling of dynamics
@@ -43,10 +52,10 @@ DEFAULT_CONFIG = {
     'diff_orthogonal': 0,  # 0 uses standard normal perturbations, an integer uses n random orthogonal perturbations
     'diff_normal': 0,
 
-    'gamma': 1.0,
+    'gamma': 0.5,
 
     'batch_size': 100,
-    'learning_rate': 0.001,
+    'learning_rate': 0.0001,
     'weight_decay': 1e-2,
     'epochs': 500,
 
@@ -66,9 +75,6 @@ DEFAULT_CONFIG = {
     'visualize': False,
     'visualize_length': 500
 }
-import traceback
-import warnings
-import sys
 
 if __name__ == '__main__':
     import argparse
@@ -82,6 +88,8 @@ if __name__ == '__main__':
     parser.add_argument(f'--cfg', default=[], action='append')
     parser.add_argument(f'--name', default=None)
     parser.add_argument(f'--output_base', default='results')
+    parser.add_argument(f'--main', default='default')
+    parser.add_argument(f'--noises', default='noisy_demo')
 
     # An alternate way of specifying the order. If specified will
     # override jac_lambda with 1/hess_lambda with 10
@@ -95,9 +103,9 @@ if __name__ == '__main__':
             args.jac_lambda = 1
             args.hess_lambda = 10
 
-    if not args.seed:
-        args.seed = np.random.randint(0, 0x7fffffff)
-        logger.info(f'Using randomly generated seed {args.seed} for all runs')
+    # if not args.seed:
+    #     args.seed = np.random.randint(0, 0x7fffffff)
+    #     logger.info(f'Using randomly generated seed {args.seed} for all runs')
 
     config = AttrDict(DEFAULT_CONFIG)
     # Patch in the non-none elements from the arguments
@@ -105,6 +113,7 @@ if __name__ == '__main__':
     for k in {'cfg', 'output_base', 'name', 'wandb'}:
         if k in config:
             del config[k]
+
     configs = [config]
     # If we are doing a sweep, transform the config by the sweep module
     for transform in args.cfg:
@@ -117,4 +126,4 @@ if __name__ == '__main__':
             new_configs.extend(mapped)
         configs = new_configs
     run_all(train, configs,
-            args.name or '_'.join(args.cfg), args.output_base, args.wandb)
+            args.name, args.output_base, args.wandb, args)

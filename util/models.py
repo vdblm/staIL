@@ -20,7 +20,8 @@ class MLP(nn.Module):
     bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = flax.linen.initializers.zeros
     batch_norm: bool = False
     use_running_average: Optional[bool] = None
-    lipschitz: bool = False
+    lipschitz: bool = False,
+    lipschitz_constant: float = 1.0
 
     @nn.compact
     def __call__(self, x, use_running_average=None):
@@ -33,15 +34,24 @@ class MLP(nn.Module):
             activation_fn = jax.nn.gelu
         elif self.activation == 'tanh':
             activation_fn = jax.nn.tanh
+        elif self.activation == 'maxmin':
+            activation_fn = lambda inp: max_min(inp, inp.shape[-1] // 2)
         else:
             raise ValueError(f"Expected relu, tanh, or gelu, got {self.activation}")
         for (i, feat) in enumerate(self.features):
             if self.lipschitz:
                 x = BjorckLinear(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
-                if x.shape[-1] % 2:
+                if x.shape[-1] % 2:  # and not inp.shape[-1] == 1:
                     raise ValueError(f"Number of features ({x.shape[-1]}) is not a multiple of 2")
+                if x.shape[-1] == 1:
+                    x = jnp.concatenate([x, x], axis=-1)
                 x = max_min(x, x.shape[-1] // 2)
+                # if inp.shape[-1] == 1:
+                #     inp = (inp[:, 0] + inp[:, 1]) / 2.
+                if i == len(self.features) - 1:
+                    x = x * self.lipschitz_constant
             else:
+                # print(x.shape)
                 x = nn.Dense(feat, name=f"layer_{i}", kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
                 if i != len(self.features) - 1:
                     if self.batch_norm:
@@ -53,13 +63,13 @@ class MLP(nn.Module):
 
 
 def safe_norm(x, min_norm, *args, **kwargs):
-    """Returns jnp.maximum(jnp.linalg.norm(x), min_norm) with correct gradients.
-      The gradients of jnp.maximum(jnp.linalg.norm(x), min_norm) at 0.0 is NaN,
+    """Returns jnp.maximum(jnp.linalg.norm(inp), min_norm) with correct gradients.
+      The gradients of jnp.maximum(jnp.linalg.norm(inp), min_norm) at 0.0 is NaN,
       because jax will evaluate both branches of the jnp.maximum.
       The version in this function will return the correct gradient of 0.0 in this
       situation.
       Args:
-      x: jax array.
+      inp: jax array.
       min_norm: lower bound for the returned norm.
     """
     norm = jnp.linalg.norm(x, *args, **kwargs)
@@ -102,6 +112,25 @@ def scale_clip_bp_fwd(x, max_norm):
 
 def scale_clip_bp_bwd(max_norm, g):
     return scale_clip_grads(g, max_norm), None  # use None to indicate zero cotangents for lo and hi
+
+
+class LipschitzSchedule:
+    def __init__(self, init_value, wait_steps, end_value, rate=0.75):
+        self.lip_const = init_value
+        self.wait_steps = wait_steps
+        self.end_value = end_value
+        self.rate = rate
+        self.min_loss = 1e9
+        self.waited = 0
+
+    def __call__(self, loss):
+        if loss < self.min_loss and self.waited < self.wait_steps:
+            self.waited += 1
+        elif loss < self.min_loss:
+            self.min_loss = loss
+            self.waited = 0
+            self.lip_const = max(self.lip_const * self.rate, self.end_value)
+        return self.lip_const
 
 
 scale_clip_bp.defvjp(scale_clip_bp_fwd, scale_clip_bp_bwd)

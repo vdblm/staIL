@@ -3,7 +3,7 @@ from util.models import safe_norm, clip_gradient, scale_clip_bp
 from util.dataset import Dataset
 from util.trainer import Trainer
 from util.sweep import log_info
-from imitation_learning.rollout import ModelPolicy
+from imitation_learning.rollout import ModelPolicy, NormalGenerator
 import util.dataset.config as dconfig
 
 from imitation_learning.bc import bc
@@ -45,11 +45,14 @@ def train(config):
         def add_data(traj, rng):
             traj = dict(traj)
             traj['expert_u'] = jax.vmap(expert)(traj['x'])
+            expert_noisy_rng = jax.random.split(rng, traj['x'].shape[0] + 1)
+            expert_noisy_rng, key = expert_noisy_rng[:-1], expert_noisy_rng[-1]
+            traj['expert_noisy_u'] = jax.vmap(expert_noisy_demo)(traj['x'], expert_noisy_rng)
             if config.jac_lambda or config.report_jac_error:
                 traj['expert_jac'] = jax.vmap(jax.jacrev(expert))(traj['x'])
             if config.hess_lambda or config.report_hess_error:
                 traj['expert_hess'] = jax.vmap(jax.jacfwd(jax.jacrev(expert)))(traj['x'])
-            traj['rng'] = jax.random.split(rng, traj['x'].shape[0])
+            traj['rng'] = jax.random.split(key, traj['x'].shape[0])
             return traj
 
         generator = generator.map(add_data, d_aux_rng)
@@ -57,8 +60,16 @@ def train(config):
 
     # The base loss function
     def loss_fn(key, policy, params, sample, iteration, update_batch_stats=True):
-        x = sample['x']
-        expert_u = sample['expert_u']
+        if config.noisy_input:
+            x = sample['noisy_x']
+        else:
+            x = sample['x']
+        if config.noisy_demo:
+            expert_u = sample['expert_noisy_u']
+        else:
+            expert_u = sample['expert_u']
+
+        policy_grad = jax.grad(policy)
 
         if update_batch_stats:
             train_u, new_batch_stats = policy(x, update_batch_stats=True)
@@ -71,6 +82,11 @@ def train(config):
 
         loss = pi_error
         stats = {'pi_error': pi_error}
+
+        if config.jacob_reg:
+            jacobs = (jax.jacobian(policy)(x) ** 2).mean()
+            stats['jacobs'] = jacobs
+            loss += config.jacob_lambda * jacobs
         # if config.jac_lambda > 0 or config.report_jac_error:
         #     expert_jac = sample['expert_jac']
         #     train_jac = jax.jacrev(policy)(x)
@@ -127,7 +143,7 @@ def train(config):
         return loss, stats, new_batch_stats
 
     # Create the system from the config
-    generator, expert, policy, init_params = make_system(config, next(rng))
+    generator, expert, policy, init_params, expert_noisy_demo, expert_params = make_system(config, next(rng))
     dataset_builder = functools.partial(make_dataset, generator, data_preprocess)
 
     # Setup the trainer
@@ -153,6 +169,7 @@ def train(config):
     # Rollout under the final policy
     logger.info('Rolling out test data...')
     generator = generator.with_key(next(rng))
+    # generator = generator.with_init_gen(NormalGenerator(config.state_dim, mean=config.test_mean_normal))
     # rollout for the same key under both the expert and trained policies
     expert_test_data = generator.until(config.test_trajs)
     trained_test_data = generator.with_policy(lambda x, r: policy(final_params, x)).until(config.test_trajs)
@@ -200,4 +217,4 @@ def train(config):
         else:
             logger.info('No images to visualize')
 
-    return {'test': test_stats, 'train': train_stats}, final_params
+    return {'test': test_stats, 'train': train_stats}, final_params, expert_params

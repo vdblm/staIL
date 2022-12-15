@@ -11,13 +11,15 @@ from util.dataset.config import fun as fun_conf
 
 class TrajectoryGenerator(Dataset):
     def __init__(self, rng_key, traj_length,
-                 init_gen, dynamics, policy):
+                 init_gen, dynamics, policy,
+                 traj_noise_std):
         assert traj_length > 0
         self._rng_key = rng_key
         self._traj_length = traj_length
         self._init_gen = init_gen
         self._dynamics = dynamics
         self._policy = policy
+        self._traj_noise_std = traj_noise_std
 
     @property
     def length(self):
@@ -33,15 +35,19 @@ class TrajectoryGenerator(Dataset):
 
     def with_length(self, length):
         return TrajectoryGenerator(self._rng_key, length,
-                                   self._init_gen, self._dynamics, self._policy)
+                                   self._init_gen, self._dynamics, self._policy, self._traj_noise_std)
 
     def with_key(self, rng_key):
         return TrajectoryGenerator(rng_key, self._traj_length,
-                                   self._init_gen, self._dynamics, self._policy)
+                                   self._init_gen, self._dynamics, self._policy, self._traj_noise_std)
 
     def with_policy(self, policy):
         return TrajectoryGenerator(self._rng_key, self._traj_length,
-                                   self._init_gen, self._dynamics, policy)
+                                   self._init_gen, self._dynamics, policy, self._traj_noise_std)
+
+    def with_init_gen(self, init_gen):
+        return TrajectoryGenerator(self._rng_key, self._traj_length, init_gen, self._dynamics,
+                                   self._policy, self._traj_noise_std)
 
     def with_visualize(self, vis):
         return self
@@ -55,13 +61,14 @@ class TrajectoryGenerator(Dataset):
             next_state = self._dynamics(d_rng, state, inp)
             return next_state, (next_state, inp)
 
-        init_key, final_inp_key = jax.random.split(rng_keys[0])
+        init_key, final_inp_key, noisy_x_key = jax.random.split(rng_keys[0], 3)
         x0 = self._init_gen(init_key)
         _, (xs, us) = jax.lax.scan(scan_fn, x0, rng_keys[1:])
         xs = jnp.concatenate((jnp.expand_dims(x0, 0), xs))
         uf = self._policy(xs[-1], final_inp_key)
         us = jnp.concatenate((us, jnp.expand_dims(uf, 0)))
-        return {'x': xs, 'u': us}
+        noisy_xs = jax.random.normal(noisy_x_key, xs.shape) * self._traj_noise_std + xs
+        return {'x': xs, 'u': us, 'noisy_x': noisy_xs}
 
     def iter(self):
         return TrajectoryIterator(self, self._rng_key)
@@ -101,14 +108,16 @@ class TrajectoryIterator(DatasetIterator):
 
 
 class NormalGenerator:
-    def __init__(self, state_dim):
+    def __init__(self, state_dim, mean=0, std=1):
         self._state_dim = state_dim
+        self._mean = mean
+        self._std = std
 
     def __config__(self):
         return {'state_dim': self._state_dim}
 
     def __call__(self, rng):
-        return jax.random.normal(rng, shape=(self._state_dim,))
+        return jax.random.normal(rng, shape=(self._state_dim,)) * self._std + self._mean
 
 
 class ModelPolicy:

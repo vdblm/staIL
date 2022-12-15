@@ -19,6 +19,7 @@ INFINITE = float("inf")
 _JAX_HOSTS = {}
 _JAX_NEXT_HOST_ID = 0
 
+
 class Dataset:
     # Can return None for either unknown or infinite length
     @property
@@ -60,7 +61,7 @@ class Dataset:
 
     def until(self, n):
         return self.slice(0, n)
-    
+
     def batch(self, n):
         from .batch import BatchedDataset
         return BatchedDataset(self, n)
@@ -132,6 +133,7 @@ class Dataset:
     def from_pytree(data):
         return PyTreeDataset(data)
 
+
 # Dataset iterators should be immutable!
 class DatasetIterator:
     @property
@@ -153,27 +155,29 @@ class DatasetIterator:
         host_id = JaxLoaderHost.make(self, prefetch)
         return JaxLoader(jnp.array(host_id), 0, self.has_next, example)
 
+
 from jax.tree_util import register_pytree_node_class
+
 
 @register_pytree_node_class
 class SimpleIterator(DatasetIterator):
     def __init__(self, dataset, i):
         self.dataset = dataset
         self.i = i
-    
+
     @property
     def has_next(self):
         return self.i < self.dataset.length
 
     def next(self):
         return SimpleIterator(self.dataset, self.i + 1), self.dataset.get(self.i)
-    
+
     def skip(self, n):
         return SimpleIterator(self.dataset, self.i + n)
 
     def tree_flatten(self):
         return ((self.dataset, self.i), None)
-    
+
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children)
@@ -197,7 +201,7 @@ class PyTreeDataset(Dataset):
 
     def get(self, i):
         return tree_util.tree_map(lambda x: x[i], self.data)
-    
+
     def shuffle(self, seed, buffer_size=None):
         perm = jax.random.permutation(seed, self.length)
         shuffled_data = jax.tree_util.tree_map(lambda x: x[perm], self.data)
@@ -208,6 +212,7 @@ class PyTreeDataset(Dataset):
             x = x.reshape((n, -1,) + x.shape[1:])
             x = jnp.swapaxes(x, 0, 1)
             return x
+
         batch_data = tree_util.tree_map(
             make_batch, self.data
         )
@@ -223,6 +228,7 @@ class PyTreeDataset(Dataset):
     def tree_unflatten(aux_data, children):
         return PyTreeDataset(*children)
 
+
 class JaxLoaderHost:
     def __init__(self, iterator, prefetch):
         self._iterator = iterator
@@ -232,7 +238,7 @@ class JaxLoaderHost:
         self._thread.start()
         for i in range(prefetch):
             self._take_requests.put((None,))
-    
+
     def fill(self):
         try:
             while True:
@@ -268,11 +274,13 @@ class JaxLoaderHost:
         _JAX_HOSTS[id] = host
         return id
 
+
 def _loader_host_fn(args):
     host_id, index = args
     host = _JAX_HOSTS[host_id.item()]
     sample, has_next = host.take(index)
     return sample, has_next
+
 
 @register_pytree_node_class
 class JaxLoader(DatasetIterator):
@@ -289,13 +297,13 @@ class JaxLoader(DatasetIterator):
     @jax.jit
     def next(self):
         batch, new_has_next = jax.experimental.host_callback.call(_loader_host_fn, (self._host, self._index),
-                                                                    result_shape=(self._example, bool))
+                                                                  result_shape=(self._example, bool))
         return JaxLoader(self._host, self._index + 1, new_has_next, self._example), batch
 
     def tree_flatten(self):
         children = (self._index, self._has_next, self._host, self._example)
         return children, None
-    
+
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         index, has_next, host, example = children

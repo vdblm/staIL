@@ -1,9 +1,10 @@
 from . import Dataset, DatasetIterator
 
+
 class SlicedDataset(Dataset):
     def __init__(self, dataset, start, stop, step):
         start, step = start or 0, step or 1
-        d_len =  dataset.length
+        d_len = dataset.length
         stop = min(d_len, stop) if stop is not None and d_len is not None else stop
 
         self.num = None if stop is None else (stop - start) // step
@@ -13,19 +14,19 @@ class SlicedDataset(Dataset):
         self.step = step
 
     def __config__(self):
-        return { 'sliced': self.dataset.__config__(), 
-                 'start': self.start, 'stop': self.stop,
-                 'step': self.step }
+        return {'sliced': self.dataset.__config__(),
+                'start': self.start, 'stop': self.stop,
+                'step': self.step}
 
     @property
     def length(self):
         return self.num
-    
+
     def get(self, i):
         if i > self.num:
             raise IndexError("Out of dataset range")
-        return self.dataset.get(self.start + self.step*i)
-    
+        return self.dataset.get(self.start + self.step * i)
+
     def iter(self):
         sub_iter = self.dataset.iter()
         if self.start > 0:
@@ -36,13 +37,14 @@ class SlicedDataset(Dataset):
     # Will recompute a new slice rather
     # than chaining sliced datasets for efficiency
     def slice(self, start, stop, step):
-        mapped_stop = stop*self.step if stop is not None else None
+        mapped_stop = stop * self.step if stop is not None else None
         new_stop = (mapped_stop if self.stop is None else
-                   self.stop if mapped_stop is None else min(mapped_stop, self.stop))
+                    self.stop if mapped_stop is None else min(mapped_stop, self.stop))
         return self.dataset.slice(
-            self.start + start*self.step,
+            self.start + start * self.step,
             new_stop,
-            step*self.step)
+            step * self.step)
+
 
 class SlicedIterator(DatasetIterator):
     def __init__(self, sub_iter, step, remaining):
@@ -53,8 +55,8 @@ class SlicedIterator(DatasetIterator):
     @property
     def has_next(self):
         return (self.remaining > 0 if self.remaining is not None else True) \
-                and self.sub_iter.has_next
-    
+               and self.sub_iter.has_next
+
     def next(self):
         if self.remaining is not None:
             if self.remaining <= 0:
@@ -67,7 +69,7 @@ class SlicedIterator(DatasetIterator):
         if self.step > 1:
             sub_iter = sub_iter.skip(self.step - 1)
         return SlicedIterator(sub_iter, self.step, remaining), x
-    
+
     def skip(self, n):
-        sub_iter = self.sub_iter.skip(self.step*n)
+        sub_iter = self.sub_iter.skip(self.step * n)
         return SlicedIterator(sub_iter, self.step, self.remaining - n if self.remaining is not None else None)

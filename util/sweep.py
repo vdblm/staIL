@@ -1,9 +1,13 @@
+from pathlib import Path
+
 from loguru import logger
 import itertools
 import os
 import json
 import pickle
 import wandb
+import numpy as np
+from scipy.io import savemat
 
 
 def common_config(configs):
@@ -30,7 +34,7 @@ def log_info(dict):
         logger.opt(colors=True).info(f'    <blue>{k}</blue>: {v}')
 
 
-def run_all(train_fn, configs, name=None, output_base=None, use_wandb=False):
+def run_all(train_fn, configs, name=None, output_base=None, use_wandb=False, args=None):
     sweep_base = name or "manual_run"
     if use_wandb:
         assert len(configs) == 1
@@ -54,7 +58,7 @@ def run_all(train_fn, configs, name=None, output_base=None, use_wandb=False):
         if sweeps > 1:
             logger.opt(colors=True).info(f"<red>Sweep run</red> <blue>{i + 1}</blue>/<blue>{sweeps}</blue>")
             log_info(config_diff)
-        stats, final_params = train_fn(config)
+        stats, final_params, expert_params = train_fn(config)
         if use_wandb:
             for k, v in stats.items():
                 wandb.run.summary[k] = v
@@ -64,12 +68,25 @@ def run_all(train_fn, configs, name=None, output_base=None, use_wandb=False):
             output = {'name': run_name, 'config': config, 'config_diff': config_diff, 'stats': stats}
             output_json_file = os.path.join(output_path, f'{run_name}.json')
             output_weight_file = os.path.join(output_path, f'{run_name}.pk')
+            output_weight_mat = os.path.join(output_path, f'{run_name}.mat')
+
+            expert_output = os.path.join(output_path, f'{run_name}_expert.pk')
             logger.opt(colors=True).info(f"Saving stats to <blue>{output_json_file}</blue>")
             with open(output_json_file, 'w') as f:
                 json.dump(output, f)
             logger.opt(colors=True).info(f"Saving weights to <blue>{output_weight_file}</blue>")
+
             with open(output_weight_file, "wb") as f:
                 pickle.dump(final_params, f)
+            with open(output_weight_mat, "wb") as f:
+                savemat(f, get_numpy_weights(final_params))
+            with open(expert_output, "wb") as f:
+                pickle.dump(expert_params, f)
+            results = {'delta_err': [stats['test']['delta_err']], 'mean_imitation_err': [stats['test']['mean_imitation_err']],
+                       'main': [args.main], 'noise': [args.noises], 'seed': [config.seed], 'lr': [config.learning_rate],
+                       'noisy_demo_std': [config.noisy_demo_std], 'gamma': [config.gamma],
+                       'lip_const': [config.lip_const], 'jacob_lambda': [config.jacob_lambda]}
+            save_results(results, 'summary_gamma.csv')
 
 
 def read_all(output_base, **sweep_names):
@@ -77,3 +94,22 @@ def read_all(output_base, **sweep_names):
     for s in sweep_names:
         sweep_path = os.path.join(output_base)
     return sweeps
+
+
+import pandas as pd
+
+
+def save_results(results: dict, save_path: str):
+    """Save the results to a csv file"""
+    df = pd.DataFrame(results)
+    if Path(save_path).is_file():
+        df = pd.concat([pd.read_csv(save_path), df])
+    df.to_csv(save_path, index=False)
+
+
+def get_numpy_weights(params):
+    layers = list(params['params'].keys())
+    weights = []
+    for layer in layers:
+        weights.append(np.array(params['params'][layer]['kernel']).astype('float64').T)
+    return {'weights': weights}

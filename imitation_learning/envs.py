@@ -13,7 +13,7 @@ def make_system(config, rng_key):
         expert_rng, policy_rng, gen_rng = jax.random.split(rng_key, 3)
         expert_model = MLP((32, 32, config.state_dim), config.activation,
                            kernel_init=jax.nn.initializers.variance_scaling(1.0, "fan_in", "truncated_normal"),
-                           bias_init=jax.nn.initializers.normal(0.1), lipschitz=True)
+                           bias_init=jax.nn.initializers.normal(0.1), lipschitz=False)
         expert_params = expert_model.init(expert_rng, jnp.zeros(config.state_dim))
 
         def expert(x, rng=None):
@@ -21,17 +21,26 @@ def make_system(config, rng_key):
             # return mu
             return jax.nn.tanh(mu)
 
+        def expert_noisy_dem(x, rng, std=config.noisy_demo_std):
+            _, rng = jax.random.split(rng)
+            mu = expert_model.apply(expert_params, x)
+            mu += jax.random.normal(rng, shape=mu.shape) * std
+            return jax.nn.tanh(mu)
+
         generator = TrajectoryGenerator(
             traj_length=config.traj_length,
             init_gen=NormalGenerator(config.state_dim),
             dynamics=ArtificialSystem(5, 0.3, config.gamma, expert) if config.environment == 'dummy' else ExponentialSystem(0.95, 5, config.gamma, expert),
             policy=expert,
-            rng_key=gen_rng
+            rng_key=gen_rng,
+            traj_noise_std=config.noisy_input_std
         )
-        model = MLP((64, 64, 64, config.state_dim), config.activation, lipschitz=True)
+        model = MLP((64, 64, 64, config.state_dim), config.activation, lipschitz=config.lip_policy,
+                    lipschitz_constant=config.lip_const)
         init_params = model.init(policy_rng, jnp.zeros(config.state_dim), use_running_average=False)
 
-        def policy(vars, x, rng=None, update_batch_stats=False):
+        def policy(vars, x, rng=None, lip_const=config.lip_const, update_batch_stats=False):
+            # model.lipschitz_constant = lip_const
             if update_batch_stats:
                 mu, bs = model.apply(vars, x, mutable=['batch_stats'], use_running_average=False)
             else:
@@ -40,7 +49,7 @@ def make_system(config, rng_key):
             mu = jax.nn.tanh(mu)
             return (mu, bs) if update_batch_stats else mu
 
-        return generator, expert, policy, init_params
+        return generator, expert, policy, init_params, expert_noisy_dem, expert_params
     elif config.environment.startswith("gym"):
         policy_rng, gen_rng = jax.random.split(rng_key, 2)
 
@@ -57,7 +66,7 @@ def make_system(config, rng_key):
             scale_dynamics=config.gym_scale_dynamics,
             vis=False
         )
-        return generator, expert, policy, init_params
+        return generator, expert, policy, init_params, expert
     else:
         raise ValueError("Unrecognized environment")
 

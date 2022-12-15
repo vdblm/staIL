@@ -11,9 +11,10 @@ from flax.linen.module import Module
 from flax.linen.dtypes import promote_dtype
 from jax import eval_shape
 from jax import lax
+import jax
 from jax import ShapedArray
 import jax.numpy as jnp
-import numpy as np
+from functools import partial
 
 PRNGKey = Any
 Shape = Tuple[int, ...]
@@ -23,6 +24,7 @@ PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str],
                       Tuple[lax.Precision, lax.Precision]]
 
 
+@partial(jax.jit, static_argnames=['iters'])
 def bjorck_orthonormalize_order1(weight, beta, iters):
     for _ in range(iters):
         w_t_w = jnp.matmul(jnp.transpose(weight), weight)
@@ -31,6 +33,7 @@ def bjorck_orthonormalize_order1(weight, beta, iters):
     return weight
 
 
+@jax.jit
 def get_safe_bjorck_scaling(weight):
     return jnp.sqrt(weight.shape[0] * weight.shape[1])
 
